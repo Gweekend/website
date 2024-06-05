@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>불편사항 건의</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <style>
+        #map {
+            height: 90vh; /* 화면의 대부분을 지도에 할당 */
+            width: 100%; /* 화면 전체 너비 */
+        }
+        #search {
+            margin: 10px;
+        }
+        #instructions {
+            font-size: 12px;
+            color: gray;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>불편사항 건의</h1>
+    <div id="instructions">(p키를 눌러 불편사항을 건의하세요)</div>
+    <div id="search">
+        <input type="text" id="searchInput" placeholder="장소를 입력하세요" />
+        <button onclick="searchLocation()">검색</button>
+    </div>
+    <!-- 지도를 표시할 div -->
+    <div id="map"></div>
+
+    <!-- Leaflet JS 라이브러리 -->
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script>
+        var map = L.map('map').setView([37.5665, 126.9780], 13); // 서울의 위도와 경도, 줌 레벨
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+
+        var mouseLatLng;
+        var markerMap = {}; // 클라이언트의 마커 ID와 서버의 마커 ID를 매핑하는 객체
+
+        map.on('mousemove', function(e) {
+            mouseLatLng = e.latlng;
+        });
+
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'f' && mouseLatLng) {
+                var name = prompt("마커의 이름을 입력하세요:");
+                if (name) {
+                    addMarker(mouseLatLng, name);
+                }
+            }
+            if (e.key === 'p' && mouseLatLng) {
+                var name = prompt("불편사항을 입력하세요:");
+                if (name) {
+                    addMarker(mouseLatLng, name);
+                }
+            }
+        });
+
+        function addMarker(latlng, name) {
+            var marker = L.marker(latlng).addTo(map);
+            marker.bindPopup(`<b>${name}</b><br><button onclick="deleteMarker(${marker._leaflet_id})">Delete</button>`);
+            marker.on('click', function() {
+                marker.openPopup();
+            });
+            saveMarker(latlng, name, marker._leaflet_id);
+        }
+
+        function saveMarker(latlng, name, id) {
+            fetch('http://localhost:3000/api/markers', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ lat: latlng.lat, lng: latlng.lng, name: name })
+            })
+            .then(response => response.json())
+            .then(data => {
+                markerMap[id] = data.id; // 서버의 마커 ID를 클라이언트의 마커 ID에 매핑
+                console.log('Marker saved:', data);
+            })
+            .catch(error => console.error('Error saving marker:', error));
+        }
+
+        function loadMarkers() {
+            fetch('http://localhost:3000/api/markers')
+                .then(response => response.json())
+                .then(data => {
+                    data.forEach(marker => {
+                        var m = L.marker([marker.lat, marker.lng]).addTo(map);
+                        m.bindPopup(`<b>${marker.name}</b><br><button onclick="deleteMarker(${m._leaflet_id})">Delete</button>`);
+                        m.on('click', function() {
+                            m.openPopup();
+                        });
+                        markerMap[m._leaflet_id] = marker.id; // 서버의 마커 ID를 클라이언트의 마커 ID에 매핑
+                    });
+                })
+                .catch(error => console.error('Error loading markers:', error));
+        }
+
+        function deleteMarker(id) {
+            var markerId = markerMap[id];
+            if (markerId) {
+                fetch(`http://localhost:3000/api/markers/${markerId}`, {
+                    method: 'DELETE'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    map.eachLayer(layer => {
+                        if (layer._leaflet_id === id) {
+                            map.removeLayer(layer);
+                        }
+                    });
+                    delete markerMap[id];
+                    console.log('Marker deleted:', data);
+                })
+                .catch(error => console.error('Error deleting marker:', error));
+            }
+        }
+
+        // 페이지 로드 시 마커 로드
+        loadMarkers();
+
+        // 검색 기능
+        function searchLocation() {
+            var searchInput = document.getElementById('searchInput').value;
+            fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${searchInput}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.length > 0) {
+                        var latlng = [data[0].lat, data[0].lon];
+                        map.setView(latlng, 13);
+                    } else {
+                        alert('검색 결과가 없습니다.');
+                    }
+                })
+                .catch(error => console.error('Error:', error));
+        }
+    </script>
+</body>
+</html>
